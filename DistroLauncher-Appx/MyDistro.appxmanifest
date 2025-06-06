@@ -24,9 +24,9 @@
         <uap:SplashScreen Image="Assets\SplashScreen.png" />
       </uap:VisualElements>
       <Extensions>
-        <uap3:Extension Category="windows.appExecutionAlias" Executable="launcher.exe" EntryPoint="Windows.FullTrustApplication">
+        <uap3:Extension Category="windows.appExecutionAlias" Executable="mydistro.exe" EntryPoint="Windows.FullTrustApplication">
           <uap3:AppExecutionAlias>
-            <desktop:ExecutionAlias Alias="launcher.exe" />
+            <desktop:ExecutionAlias Alias="mydistro.exe" />
           </uap3:AppExecutionAlias>
         </uap3:Extension>
       </Extensions>
