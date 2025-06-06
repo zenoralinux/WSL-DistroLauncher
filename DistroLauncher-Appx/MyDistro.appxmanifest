@@ -26,7 +26,7 @@
       <Extensions>
         <uap3:Extension Category="windows.appExecutionAlias" Executable="mydistro.exe" EntryPoint="Windows.FullTrustApplication">
           <uap3:AppExecutionAlias>
-            <desktop:ExecutionAlias Alias="mydistro.exe" />
+            <desktop:ExecutionAlias Alias="launcher.exe" />
           </uap3:AppExecutionAlias>
         </uap3:Extension>
       </Extensions>
