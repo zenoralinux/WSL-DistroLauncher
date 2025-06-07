@@ -13,10 +13,10 @@ namespace DistributionInfo
     //
     // WARNING: This value must not change between versions of your app,
     // otherwise users upgrading from older versions will see launch failures.
-    const std::wstring Name = L"Zenora Linux";
+    const std::wstring Name = L"Zenora";
 
     // The title bar for the console window while the distribution is installing.
-    const std::wstring WindowTitle = L"Zenora Linux";
+    const std::wstring WindowTitle = L"Zenora";
 
     // Create and configure a user account.
     bool CreateUser(std::wstring_view userName);
