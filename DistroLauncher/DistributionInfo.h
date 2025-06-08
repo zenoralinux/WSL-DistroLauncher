@@ -17,6 +17,7 @@ namespace DistributionInfo
 
     // The title bar for the console window while the distribution is installing.
     const std::wstring WindowTitle = L"Zenora";
+    const std::wstring DistroIcon = L"icon.ico";
 
     // Create and configure a user account.
     bool CreateUser(std::wstring_view userName);
