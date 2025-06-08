@@ -42,7 +42,6 @@ bool AddZenoraProfileToWindowsTerminal() {
             $zenoraProfile = @{
                 guid = "{a79cd884-4081-569f-9e90-570201e5b7c4}"
                 name = "Zenora"
-                commandline = "wsl -d ZenoraLinux"
                 fontFace = "0xProto Nerd Font Mono"
                 fontSize = 12
                 useAcrylic = $true
