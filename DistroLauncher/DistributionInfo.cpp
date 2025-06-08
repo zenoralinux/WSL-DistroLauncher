@@ -1,6 +1,7 @@
 #include <windows.h>
 #include <shlobj.h> // برای SHGetKnownFolderPath
 #include <string>
+#include "stdafx.h"
 
 // تابع برای اجرای دستور PowerShell و بازگرداندن خروجی
 bool RunPowerShellCommand(const std::wstring& command, DWORD* exitCode = nullptr) {
