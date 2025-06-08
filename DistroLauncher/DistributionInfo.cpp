@@ -5,168 +5,62 @@
 
 #include "stdafx.h"
 
-// Commandline arguments: 
-#define ARG_CONFIG              L"config"
-#define ARG_CONFIG_DEFAULT_USER L"--default-user"
-#define ARG_INSTALL             L"install"
-#define ARG_INSTALL_ROOT        L"--root"
-#define ARG_RUN                 L"run"
-#define ARG_RUN_C               L"-c"
-
-// Helper class for calling WSL Functions:
-// https://msdn.microsoft.com/en-us/library/windows/desktop/mt826874(v=vs.85).aspx
-WslApiLoader g_wslApi(DistributionInfo::Name);
-
-static HRESULT InstallDistribution(bool createUser);
-static HRESULT SetDefaultUser(std::wstring_view userName);
-
-HRESULT InstallDistribution(bool createUser)
+bool DistributionInfo::CreateUser(std::wstring_view userName)
 {
-    // Register the distribution.
-    Helpers::PrintMessage(MSG_STATUS_INSTALLING);
-    HRESULT hr = g_wslApi.WslRegisterDistribution();
-    if (FAILED(hr)) {
-        return hr;
-    }
-
-    // Delete /etc/resolv.conf to allow WSL to generate a version based on Windows networking information.
+    // Create the user account and add the user account to any relevant groups.
     DWORD exitCode;
-    hr = g_wslApi.WslLaunchInteractive(L"/bin/rm /etc/resolv.conf", true, &exitCode);
-    if (FAILED(hr)) {
-        return hr;
-    }
+    std::wstring commandLine = L"/usr/sbin/useradd -m -G wheel ";
+    commandLine += userName;
+    HRESULT hr = g_wslApi.WslLaunchInteractive(commandLine.c_str(), true, &exitCode);
+	if ((FAILED(hr)) || (exitCode != 0)) return false;
 
-    // Create a user account.
-    if (createUser) {
-        Helpers::PrintMessage(MSG_CREATE_USER_PROMPT);
-        std::wstring userName;
-        do {
-            userName = Helpers::GetUserInput(MSG_ENTER_USERNAME, 32);
-
-        } while (!DistributionInfo::CreateUser(userName));
-
-        // Set this user account as the default.
-        hr = SetDefaultUser(userName);
-        if (FAILED(hr)) {
-            return hr;
-        }
-    }
-
-    return hr;
+	commandLine = L"/usr/bin/passwd ";
+	commandLine += userName;
+	do hr = g_wslApi.WslLaunchInteractive(commandLine.c_str(), true, &exitCode);
+	while (SUCCEEDED(hr) && exitCode != 0);
+	return SUCCEEDED(hr);
 }
 
-HRESULT SetDefaultUser(std::wstring_view userName)
+ULONG DistributionInfo::QueryUid(std::wstring_view userName)
 {
-    // Query the UID of the given user name and configure the distribution
-    // to use this UID as the default.
-    ULONG uid = DistributionInfo::QueryUid(userName);
-    if (uid == UID_INVALID) {
-        return E_INVALIDARG;
-    }
-
-    HRESULT hr = g_wslApi.WslConfigureDistribution(uid, WSL_DISTRIBUTION_FLAGS_DEFAULT);
-    if (FAILED(hr)) {
-        return hr;
-    }
-
-    return hr;
-}
-
-int wmain(int argc, wchar_t const *argv[])
-{
-    // Update the title bar of the console window.
-    SetConsoleTitleW(DistributionInfo::WindowTitle.c_str());
-
-    // Initialize a vector of arguments.
-    std::vector<std::wstring_view> arguments;
-    for (int index = 1; index < argc; index += 1) {
-        arguments.push_back(argv[index]);
-    }
-
-    // Ensure that the Windows Subsystem for Linux optional component is installed.
-    DWORD exitCode = 1;
-    if (!g_wslApi.WslIsOptionalComponentInstalled()) {
-        Helpers::PrintErrorMessage(HRESULT_FROM_WIN32(ERROR_LINUX_SUBSYSTEM_NOT_PRESENT));
-        if (arguments.empty()) {
-            Helpers::PromptForInput();
-        }
-
-        return exitCode;
-    }
-
-    // Install the distribution if it is not already.
-    bool installOnly = ((arguments.size() > 0) && (arguments[0] == ARG_INSTALL));
-    HRESULT hr = S_OK;
-    if (!g_wslApi.WslIsDistributionRegistered()) {
-
-        // If the "--root" option is specified, do not create a user account.
-        bool useRoot = ((installOnly) && (arguments.size() > 1) && (arguments[1] == ARG_INSTALL_ROOT));
-        hr = InstallDistribution(!useRoot);
-        if (FAILED(hr)) {
-            if (hr == HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS)) {
-                Helpers::PrintMessage(MSG_INSTALL_ALREADY_EXISTS);
+    // Create a pipe to read the output of the launched process.
+    HANDLE readPipe;
+    HANDLE writePipe;
+    SECURITY_ATTRIBUTES sa{sizeof sa, nullptr, true};
+    auto uid = UID_INVALID;
+    if (CreatePipe(&readPipe, &writePipe, &sa, 0)) {
+        // Query the UID of the supplied username.
+        std::wstring command = L"/usr/bin/id -u ";
+        command += userName;
+        HANDLE child;
+        auto hr = g_wslApi.WslLaunch(command.c_str(), true, GetStdHandle(STD_INPUT_HANDLE), writePipe, GetStdHandle(STD_ERROR_HANDLE), &child);
+        if (SUCCEEDED(hr)) {
+            // Wait for the child to exit and ensure process exited successfully.
+            WaitForSingleObject(child, INFINITE);
+            DWORD exitCode;
+            if ((!static_cast<bool>(GetExitCodeProcess(child, &exitCode))) || (exitCode != 0)) {
+                hr = E_INVALIDARG;
             }
 
-        } else {
-            Helpers::PrintMessage(MSG_INSTALL_SUCCESS);
-        }
+            CloseHandle(child);
+            if (SUCCEEDED(hr)) {
+                char buffer[64];
+                DWORD bytesRead;
 
-        exitCode = SUCCEEDED(hr) ? 0 : 1;
-    }
+                // Read the output of the command from the pipe and convert to a UID.
+                if (ReadFile(readPipe, buffer, sizeof buffer - 1, &bytesRead, nullptr)) {
+                    buffer[bytesRead] = ANSI_NULL;
+                    try {
+                        uid = std::stoul(buffer, nullptr, 10);
 
-    // Parse the command line arguments.
-    if ((SUCCEEDED(hr)) && (!installOnly)) {
-        if (arguments.empty()) {
-            hr = g_wslApi.WslLaunchInteractive(L"", false, &exitCode);
-
-            // Check exitCode to see if wsl.exe returned that it could not start the Linux process
-            // then prompt users for input so they can view the error message.
-            if (SUCCEEDED(hr) && exitCode == UINT_MAX) {
-                Helpers::PromptForInput();
-            }
-
-        } else if ((arguments[0] == ARG_RUN) ||
-                   (arguments[0] == ARG_RUN_C)) {
-
-            std::wstring command;
-            for (size_t index = 1; index < arguments.size(); index += 1) {
-                command += L" ";
-                command += arguments[index];
-            }
-
-            hr = g_wslApi.WslLaunchInteractive(command.c_str(), true, &exitCode);
-
-        } else if (arguments[0] == ARG_CONFIG) {
-            hr = E_INVALIDARG;
-            if (arguments.size() == 3) {
-                if (arguments[1] == ARG_CONFIG_DEFAULT_USER) {
-                    hr = SetDefaultUser(arguments[2]);
+                    } catch( ... ) { }
                 }
             }
-
-            if (SUCCEEDED(hr)) {
-                exitCode = 0;
-            }
-
-        } else {
-            Helpers::PrintMessage(MSG_USAGE);
-            return exitCode;
         }
+
+        CloseHandle(readPipe);
+        CloseHandle(writePipe);
     }
 
-    // If an error was encountered, print an error message.
-    if (FAILED(hr)) {
-        if (hr == HCS_E_HYPERV_NOT_INSTALLED) {
-            Helpers::PrintMessage(MSG_ENABLE_VIRTUALIZATION);
-
-        } else {
-            Helpers::PrintErrorMessage(hr);
-        }
-
-        if (arguments.empty()) {
-            Helpers::PromptForInput();
-        }
-    }
-
-    return SUCCEEDED(hr) ? exitCode : 1;
+    return uid;
 }
