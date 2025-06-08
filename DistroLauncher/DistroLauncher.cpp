@@ -4,11 +4,6 @@
 //
 
 #include "stdafx.h"
-#include <Windows.h>
-#include <string>
-#include <fstream>
-#include <filesystem>
-#include <nlohmann/json.hpp>  // حتما کتابخانه nlohmann/json را به پروژه اضافه کنید
 
 // Commandline arguments: 
 #define ARG_CONFIG              L"config"
@@ -21,105 +16,6 @@
 // Helper class for calling WSL Functions:
 // https://msdn.microsoft.com/en-us/library/windows/desktop/mt826874(v=vs.85).aspx
 WslApiLoader g_wslApi(DistributionInfo::Name);
-
-using json = nlohmann::json;
-
-// تابع نصب فونت‌ها
-void InstallFontsFromWSL()
-{
-    // مسیر پوشه فونت‌ها - این را با مسیر واقعی برنامه خودتان تنظیم کنید
-    std::wstring appDir = L""; // اگر راهی برای تعیین دایرکتوری اپ دارید اینجا مقدار دهید
-    std::wstring fontsDir = appDir + L"fonts";
-
-    std::wstring fontsFolder = L"C:\\Windows\\Fonts";
-
-    if (!std::filesystem::exists(fontsDir)) {
-        // پوشه فونت‌ها وجود ندارد، نصب انجام نمی‌شود
-        return;
-    }
-
-    for (const auto& entry : std::filesystem::directory_iterator(fontsDir)) {
-        if (entry.is_regular_file() && entry.path().extension() == L".ttf") {
-            std::wstring fontFile = entry.path().wstring();
-            std::wstring destFile = fontsFolder + L"\\" + entry.path().filename().wstring();
-
-            // کپی فایل فونت (با overwrite)
-            if (CopyFile(fontFile.c_str(), destFile.c_str(), FALSE)) {
-                // اضافه کردن به رجیستری فونت‌ها
-                std::wstring fontName = entry.path().filename().stem().wstring();
-                std::wstring regKeyPath = L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Fonts";
-                HKEY hKey;
-
-                if (RegOpenKeyEx(HKEY_LOCAL_MACHINE, regKeyPath.c_str(), 0, KEY_WRITE, &hKey) == ERROR_SUCCESS) {
-                    std::wstring regValueName = fontName + L" (TrueType)";
-                    std::wstring regValueData = entry.path().filename().wstring();
-                    RegSetValueEx(hKey, regValueName.c_str(), 0, REG_SZ,
-                                  (const BYTE*)regValueData.c_str(),
-                                  (regValueData.size() + 1) * sizeof(wchar_t));
-                    RegCloseKey(hKey);
-                }
-            }
-        }
-    }
-}
-
-// تابع اضافه کردن پروفایل ویندوز ترمینال
-void AddTerminalProfile()
-{
-    // مسیر فایل تنظیمات ویندوز ترمینال
-    std::wstring userProfile = _wgetenv(L"USERPROFILE");
-    if (userProfile.empty()) {
-        return;
-    }
-
-    std::wstring settingsPath = userProfile + L"\\AppData\\Local\\Packages\\Microsoft.WindowsTerminal_8wekyb3d8bbwe\\LocalState\\settings.json";
-
-    std::ifstream settingsFile(settingsPath);
-    if (!settingsFile.is_open()) {
-        return;
-    }
-
-    json settings;
-    try {
-        settingsFile >> settings;
-    } catch (...) {
-        settingsFile.close();
-        return;
-    }
-    settingsFile.close();
-
-    // بررسی وجود پروفایل با GUID مشخص
-    std::string targetGuid = "{a79cd884-4081-569f-9e90-570201e5b7c4}";
-    bool profileExists = false;
-
-    for (auto& profile : settings["profiles"]["list"]) {
-        if (profile.contains("guid") && profile["guid"] == targetGuid) {
-            profileExists = true;
-            break;
-        }
-    }
-
-    if (!profileExists) {
-        json newProfile = {
-            {"guid", targetGuid},
-            {"name", "Zenora"},
-            {"source", "Windows.Terminal.Wsl"},
-            {"font", {
-                {"face", "0xProto Nerd Font Mono"},
-                {"size", 11}
-            }},
-            {"hidden", false}
-        };
-
-        settings["profiles"]["list"].push_back(newProfile);
-
-        std::ofstream outFile(settingsPath);
-        if (outFile.is_open()) {
-            outFile << settings.dump(4);
-            outFile.close();
-        }
-    }
-}
 
 static HRESULT InstallDistribution(bool createUser);
 static HRESULT SetDefaultUser(std::wstring_view userName);
@@ -155,12 +51,6 @@ HRESULT InstallDistribution(bool createUser)
             return hr;
         }
     }
-
-    // نصب فونت‌ها
-    InstallFontsFromWSL();
-
-    // اضافه کردن پروفایل ویندوز ترمینال
-    AddTerminalProfile();
 
     return hr;
 }
