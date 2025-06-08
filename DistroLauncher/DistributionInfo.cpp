@@ -1,66 +1,64 @@
-//
-//    Copyright (C) Microsoft.  All rights reserved.
-// Licensed under the terms described in the LICENSE file in the root of this project.
-//
+#include <windows.h>
+#include <shlobj.h> // برای SHGetKnownFolderPath
+#include <string>
 
-#include "stdafx.h"
-
-bool DistributionInfo::CreateUser(std::wstring_view userName)
-{
-    // Create the user account and add the user account to any relevant groups.
-    DWORD exitCode;
-    std::wstring commandLine = L"/usr/sbin/useradd -m -G wheel ";
-    commandLine += userName;
-    HRESULT hr = g_wslApi.WslLaunchInteractive(commandLine.c_str(), true, &exitCode);
-	if ((FAILED(hr)) || (exitCode != 0)) return false;
-
-	commandLine = L"/usr/bin/passwd ";
-	commandLine += userName;
-	do hr = g_wslApi.WslLaunchInteractive(commandLine.c_str(), true, &exitCode);
-	while (SUCCEEDED(hr) && exitCode != 0);
-	return SUCCEEDED(hr);
+// تابع برای اجرای دستور PowerShell و بازگرداندن خروجی
+bool RunPowerShellCommand(const std::wstring& command, DWORD* exitCode = nullptr) {
+    DWORD dwExitCode = 0;
+    HRESULT hr = g_wslApi.WslLaunchInteractive(command.c_str(), true, &dwExitCode);
+    
+    if (exitCode) {
+        *exitCode = dwExitCode;
+    }
+    
+    return SUCCEEDED(hr) && (dwExitCode == 0);
 }
 
-ULONG DistributionInfo::QueryUid(std::wstring_view userName)
-{
-    // Create a pipe to read the output of the launched process.
-    HANDLE readPipe;
-    HANDLE writePipe;
-    SECURITY_ATTRIBUTES sa{sizeof sa, nullptr, true};
-    auto uid = UID_INVALID;
-    if (CreatePipe(&readPipe, &writePipe, &sa, 0)) {
-        // Query the UID of the supplied username.
-        std::wstring command = L"/usr/bin/id -u ";
-        command += userName;
-        HANDLE child;
-        auto hr = g_wslApi.WslLaunch(command.c_str(), true, GetStdHandle(STD_INPUT_HANDLE), writePipe, GetStdHandle(STD_ERROR_HANDLE), &child);
-        if (SUCCEEDED(hr)) {
-            // Wait for the child to exit and ensure process exited successfully.
-            WaitForSingleObject(child, INFINITE);
-            DWORD exitCode;
-            if ((!static_cast<bool>(GetExitCodeProcess(child, &exitCode))) || (exitCode != 0)) {
-                hr = E_INVALIDARG;
-            }
-
-            CloseHandle(child);
-            if (SUCCEEDED(hr)) {
-                char buffer[64];
-                DWORD bytesRead;
-
-                // Read the output of the command from the pipe and convert to a UID.
-                if (ReadFile(readPipe, buffer, sizeof buffer - 1, &bytesRead, nullptr)) {
-                    buffer[bytesRead] = ANSI_NULL;
-                    try {
-                        uid = std::stoul(buffer, nullptr, 10);
-
-                    } catch( ... ) { }
+// تابع اصلی برای اضافه کردن پروفایل Zenora به Windows Terminal
+bool AddZenoraProfileToWindowsTerminal() {
+    // دستور PowerShell برای ویرایش settings.json
+    const std::wstring psScript = LR"(
+        $settingsPath = "$env:LOCALAPPDATA\Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json"
+        
+        # اگر فایل وجود نداشت، یک ساختار پایه ایجاد کن
+        if (!(Test-Path $settingsPath)) {
+            $defaultSettings = @{
+                '$schema' = "https://aka.ms/terminal-profiles-schema"
+                profiles = @{
+                    list = @()
                 }
             }
+            $defaultSettings | ConvertTo-Json -Depth 3 | Set-Content $settingsPath
         }
+        
+        # خواندن تنظیمات فعلی
+        $settings = Get-Content $settingsPath -Raw | ConvertFrom-Json
+        
+        # بررسی وجود پروفایل Zenora (برای جلوگیری از تکرار)
+        $profileExists = $settings.profiles.list | Where-Object { $_.name -eq "Zenora" }
+        
+        if (-not $profileExists) {
+            # ایجاد پروفایل جدید
+            $zenoraProfile = @{
+                guid = "{a79cd884-4081-569f-9e90-570201e5b7c4}"
+                name = "Zenora"
+                commandline = "wsl -d ZenoraLinux"
+                fontFace = "0xProto Nerd Font Mono"
+                fontSize = 12
+                useAcrylic = $true
+                acrylicOpacity = 0.8
+                hidden = $false
+                source = "Windows.Terminal.Wsl"
+            }
+            
+            # اضافه کردن پروفایل به لیست
+            $settings.profiles.list += $zenoraProfile
+            
+            # ذخیره تغییرات
+            $settings | ConvertTo-Json -Depth 10 | Set-Content $settingsPath
+        }
+    )";
 
-        CloseHandle(readPipe);
-        CloseHandle(writePipe);
-    }
-
-    return uid;
+    // اجرای اسکریپت PowerShell
+    return RunPowerShellCommand(L"powershell -Command \"" + psScript + L"\"");
 }
