@@ -4,8 +4,6 @@
 //
 
 #include "stdafx.h"
-#include <windows.h>
-#include <stdlib.h>
 
 // Commandline arguments: 
 #define ARG_CONFIG              L"config"
@@ -18,28 +16,6 @@
 // Helper class for calling WSL Functions:
 // https://msdn.microsoft.com/en-us/library/windows/desktop/mt826874(v=vs.85).aspx
 WslApiLoader g_wslApi(DistributionInfo::Name);
-
-bool RunBatchScript(const wchar_t* scriptPath) {
-    STARTUPINFOW si = { sizeof(si) };
-    PROCESS_INFORMATION pi;
-    
-    std::wstring command = L"cmd.exe /C \"" + std::wstring(scriptPath) + L"\"";
-    
-    if (!CreateProcessW(NULL, &command[0], NULL, NULL, FALSE, 
-                       CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
-        return false;
-    }
-    
-    WaitForSingleObject(pi.hProcess, INFINITE);
-    
-    DWORD exitCode;
-    GetExitCodeProcess(pi.hProcess, &exitCode);
-    
-    CloseHandle(pi.hThread);
-    CloseHandle(pi.hProcess);
-    
-    return (exitCode == 0);
-}
 
 static HRESULT InstallDistribution(bool createUser);
 static HRESULT SetDefaultUser(std::wstring_view userName);
@@ -140,11 +116,6 @@ int wmain(int argc, wchar_t const *argv[])
 
     // Parse the command line arguments.
     if ((SUCCEEDED(hr)) && (!installOnly)) {
-        // اجرای اسکریپت BAT قبل از هر کاری
-        if (!RunBatchScript(L"update_terminal_font.bat")) {
-            Helpers::PrintMessage(L"Warning: Failed to run terminal configuration script");
-        }
-
         if (arguments.empty()) {
             hr = g_wslApi.WslLaunchInteractive(L"", false, &exitCode);
 
